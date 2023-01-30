@@ -110,12 +110,25 @@ writer.saveAsTable("{{ target_relation }}")
 if 'post_write_callback' in globals():
     post_write_callback(dbt, session, df, writer)
 
-{% if model.config.get('file_format', 'delta') == 'delta' and model.config.get('delta_optimize', False) %}
-spark.sql("OPTIMIZE {{target_relation}}")
-{%- endif %}
-{%- if model.config.get('file_format', 'delta') == 'delta' and model.config.get('delta_vacuum', False) %}
-spark.sql("VACUUM {{target_relation}}")
-{%- endif %}
+
+{% if model.config.get('file_format', 'delta') == 'delta'  %}
+{% if model.config.get('delta_optimize', False) %}
+spark.sql("""\
+    OPTIMIZE {{target_relation}}
+    {% if model.config.get('delta_optimize_partition_filter', None) %}
+    WHERE {{ model.config['delta_optimize_partition_filter'] }}
+    {% endif %}
+""")
+{% endif %}
+{% if model.config.get('delta_vacuum', False) %}
+spark.sql("""
+    VACUUM {{target_relation}}
+    {% if model.config.get('delta_vacuum_retain_hours', None) %}
+    RETAIN {{ model.config['delta_vacuum_retain_hours'] }} HOURS
+    {% endif %}
+""")
+{% endif %}
+{% endif %}
 {%- endmacro -%}
 
 {%macro py_script_comment()%}

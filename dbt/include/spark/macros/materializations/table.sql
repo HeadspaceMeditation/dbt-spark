@@ -86,7 +86,36 @@ else:
   msg = f"{type(df)} is not a supported type for dbt Python materialization"
   raise Exception(msg)
 
-df.write.mode("overwrite").format("delta").option("overwriteSchema", "true").saveAsTable("{{ target_relation }}")
+writer = df.write
+
+write_options = {{ model.config.get('write_options', {}) }}
+if 'mergeSchema' not in write_options:
+    write_options.setdefault('overwriteSchema', 'true')
+write_options['format'] = "{{ model.config.get('file_format', 'delta') }}"
+{%- if model.config.get('external_table', False) %}
+write_options['path'] = "{{ model.config['location_root'] }}/{{ target_relation }}"
+{%- endif %}
+writer.options(**write_options)
+
+writer.mode("{{ model.config.get('write_mode', 'overwrite') }}")
+{%- if model.config.get('partition_by', []) %}
+writer.partitionBy(*{{ model.config.get('partition_by', []) }})
+{%- endif %}
+
+if 'pre_write_callback' in globals():
+    pre_write_callback(dbt, session, df, writer)
+
+writer.saveAsTable("{{ target_relation }}")
+
+if 'post_write_callback' in globals():
+    post_write_callback(dbt, session, df, writer)
+
+{% if model.config.get('file_format', 'delta') == 'delta' and model.config.get('delta_optimize', False) %}
+spark.sql("OPTIMIZE {{target_relation}}")
+{%- endif %}
+{%- if model.config.get('file_format', 'delta') == 'delta' and model.config.get('delta_vacuum', False) %}
+spark.sql("VACUUM {{target_relation}}")
+{%- endif %}
 {%- endmacro -%}
 
 {%macro py_script_comment()%}
